@@ -1,5 +1,13 @@
 <library path="jsk_rviz_plugins_display_plugins">
   <class
+    name="jsk_rviz_plugins/CameraInfo"
+    type="jsk_rviz_plugins::CameraInfoDisplay"
+    base_class_type="rviz_common::Display">
+    <description>
+      Displays sensor_msgs/msg/CameraInfo as a camera frustum in RViz2.
+    </description>
+  </class>
+  <class
     name="jsk_rviz_plugins/OverlayText"
     type="jsk_rviz_plugins::OverlayTextDisplay"
     base_class_type="rviz_common::Display">

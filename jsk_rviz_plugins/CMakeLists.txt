@@ -2,7 +2,10 @@ cmake_minimum_required(VERSION 3.8)
 project(jsk_rviz_plugins)
 
 find_package(ament_cmake REQUIRED)
+find_package(cv_bridge REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(image_geometry REQUIRED)
+find_package(image_transport REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
@@ -11,6 +14,7 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(rviz_common REQUIRED)
 find_package(rviz_ogre_vendor REQUIRED)
 find_package(rviz_rendering REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
 get_filename_component(OGRE_INCLUDE_PARENT_DIR "${OGRE_INCLUDE_DIRS}" DIRECTORY)
@@ -34,10 +38,14 @@ rosidl_get_typesupport_target(cpp_typesupport_target
   ${PROJECT_NAME} rosidl_typesupport_cpp)
 
 qt5_wrap_cpp(jsk_rviz_plugins_moc_files
+  src/camera_info_display.h
+  src/image_transport_hints_property.h
   src/overlay_text_display.h
 )
 
 add_library(${PROJECT_NAME}_display_plugins SHARED
+  src/camera_info_display.cpp
+  src/image_transport_hints_property.cpp
   src/overlay_text_display.cpp
   src/overlay_utils.cpp
   ${jsk_rviz_plugins_moc_files}
@@ -60,11 +68,15 @@ target_link_libraries(${PROJECT_NAME}_display_plugins
 )
 
 ament_target_dependencies(${PROJECT_NAME}_display_plugins
+  cv_bridge
+  image_geometry
+  image_transport
   pluginlib
   rclcpp
   rviz_common
   rviz_ogre_vendor
   rviz_rendering
+  sensor_msgs
   std_msgs
 )
 
