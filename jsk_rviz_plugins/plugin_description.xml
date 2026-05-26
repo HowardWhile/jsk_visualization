@@ -15,4 +15,12 @@
       Displays jsk_rviz_plugins/msg/OverlayText as a 2D overlay in RViz2.
     </description>
   </class>
+  <class
+    name="jsk_rviz_plugins/TFTrajectory"
+    type="jsk_rviz_plugins::TFTrajectoryDisplay"
+    base_class_type="rviz_common::Display">
+    <description>
+      Displays the trajectory of a TF frame in RViz2.
+    </description>
+  </class>
 </library>
