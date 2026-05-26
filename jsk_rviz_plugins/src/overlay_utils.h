@@ -44,6 +44,10 @@
 #include <OGRE/OgreHardwarePixelBuffer.h>
 // see OGRE/OgrePrerequisites.h
 //#define OGRE_VERSION    ((OGRE_VERSION_MAJOR << 16) | (OGRE_VERSION_MINOR << 8) | OGRE_VERSION_PATCH)
+#if defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #if OGRE_VERSION < ((1 << 16) | (9 << 8) | 0)
   #include <OGRE/OgrePanelOverlayElement.h>
   #include <OGRE/OgreOverlayElement.h>
@@ -55,6 +59,9 @@
   #include <OGRE/Overlay/OgreOverlayElement.h>
   #include <OGRE/Overlay/OgreOverlayContainer.h>
   #include <OGRE/Overlay/OgreOverlayManager.h>
+#endif
+#if defined(__GNUC__)
+#  pragma GCC diagnostic pop
 #endif
 
 #include <QImage>

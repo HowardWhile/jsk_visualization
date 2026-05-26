@@ -236,7 +236,7 @@ namespace jsk_rviz_plugins
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (image_updated_) {
-      if (!bottom_texture_.isNull()) {
+      if (bottom_texture_) {
         drawImageTexture();
         image_updated_ = false;
       }
@@ -300,7 +300,7 @@ namespace jsk_rviz_plugins
 
   void CameraInfoDisplay::createTextureForBottom(int width, int height)
   {
-    if (bottom_texture_.isNull()
+    if (!bottom_texture_
         || bottom_texture_->getWidth() != width
         || bottom_texture_->getHeight() != height) {
       static uint32_t count = 0;
@@ -333,7 +333,7 @@ namespace jsk_rviz_plugins
 
   void CameraInfoDisplay::prepareMaterial()
   {
-    if (texture_.isNull()) {
+    if (!texture_) {
       // material
       static uint32_t count = 0;
       rviz_common::UniformStringStream ss;
@@ -488,7 +488,7 @@ namespace jsk_rviz_plugins
       }
 
       // check the size of bottom texture
-      if (bottom_texture_.isNull()
+      if (!bottom_texture_
           || bottom_texture_->getWidth() != image_.cols
           || bottom_texture_->getHeight() != image_.rows) {
         createTextureForBottom(image_.cols, image_.rows);

@@ -136,7 +136,7 @@ namespace jsk_rviz_plugins
 
   bool OverlayObject::isTextureReady()
   {
-    return !texture_.isNull();
+    return static_cast<bool>(texture_);
   }
 
   void OverlayObject::updateTextureSize(unsigned int width, unsigned int height)
