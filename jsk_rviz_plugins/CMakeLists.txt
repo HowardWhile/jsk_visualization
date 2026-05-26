@@ -3,9 +3,17 @@ project(jsk_rviz_plugins)
 
 find_package(ament_cmake REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(pluginlib REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(Qt5 REQUIRED COMPONENTS Widgets)
+find_package(rclcpp REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(rviz_common REQUIRED)
+find_package(rviz_ogre_vendor REQUIRED)
+find_package(rviz_rendering REQUIRED)
 find_package(std_msgs REQUIRED)
+
+get_filename_component(OGRE_INCLUDE_PARENT_DIR "${OGRE_INCLUDE_DIRS}" DIRECTORY)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   msg/ObjectFitCommand.msg
@@ -22,12 +30,56 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   DEPENDENCIES geometry_msgs std_msgs
 )
 
-execute_process(
-  COMMAND "${Python3_EXECUTABLE}" -c "import sysconfig; print(sysconfig.get_path('purelib', vars={'base': '${CMAKE_INSTALL_PREFIX}', 'platbase': '${CMAKE_INSTALL_PREFIX}'}))"
-  OUTPUT_VARIABLE PYTHON_INSTALL_DIR
-  OUTPUT_STRIP_TRAILING_WHITESPACE
+rosidl_get_typesupport_target(cpp_typesupport_target
+  ${PROJECT_NAME} rosidl_typesupport_cpp)
+
+qt5_wrap_cpp(jsk_rviz_plugins_moc_files
+  src/overlay_text_display.h
 )
-file(RELATIVE_PATH PYTHON_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}" "${PYTHON_INSTALL_DIR}")
+
+add_library(${PROJECT_NAME}_display_plugins SHARED
+  src/overlay_text_display.cpp
+  src/overlay_utils.cpp
+  ${jsk_rviz_plugins_moc_files}
+)
+
+target_include_directories(${PROJECT_NAME}_display_plugins PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+  ${OGRE_INCLUDE_DIRS}
+  ${OGRE_INCLUDE_PARENT_DIR}
+)
+
+target_link_libraries(${PROJECT_NAME}_display_plugins
+  ${cpp_typesupport_target}
+  Qt5::Widgets
+  rviz_common::rviz_common
+  rviz_ogre_vendor::OgreMain
+  rviz_ogre_vendor::OgreOverlay
+  rviz_rendering::rviz_rendering
+)
+
+ament_target_dependencies(${PROJECT_NAME}_display_plugins
+  pluginlib
+  rclcpp
+  rviz_common
+  rviz_ogre_vendor
+  rviz_rendering
+  std_msgs
+)
+
+pluginlib_export_plugin_description_file(rviz_common plugin_description.xml)
+
+set(PYTHON_INSTALL_DIR
+  lib/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages
+)
+
+install(TARGETS ${PROJECT_NAME}_display_plugins
+  EXPORT ${PROJECT_NAME}_display_plugins
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 
 install(DIRECTORY python/${PROJECT_NAME}/
   DESTINATION ${PYTHON_INSTALL_DIR}/${PROJECT_NAME}
@@ -57,5 +109,6 @@ install(DIRECTORY src/
   FILES_MATCHING PATTERN "*.h"
 )
 
+ament_export_targets(${PROJECT_NAME}_display_plugins HAS_LIBRARY_TARGET)
 ament_export_dependencies(rosidl_default_runtime)
 ament_package()
