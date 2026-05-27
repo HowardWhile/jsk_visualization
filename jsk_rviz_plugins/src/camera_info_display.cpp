@@ -107,7 +107,14 @@ namespace jsk_rviz_plugins
     //manager_->destroyManualObject(manual_); // this crashes rviz
   }
 
-  CameraInfoDisplay::CameraInfoDisplay(): image_updated_(true)
+  CameraInfoDisplay::CameraInfoDisplay()
+    : alpha_(0.5),
+      far_clip_distance_(1.0),
+      show_polygons_(true),
+      show_edges_(true),
+      use_image_(false),
+      image_updated_(true),
+      not_show_side_polygons_(true)
   {
     ////////////////////////////////////////////////////////
     // initialize properties
@@ -192,6 +199,7 @@ namespace jsk_rviz_plugins
   void CameraInfoDisplay::onInitialize()
   {
     MFDClass::onInitialize();
+    image_topic_property_->initialize(context_->getRosNodeAbstraction());
     scene_node_ = scene_manager_->getRootSceneNode()->createChildSceneNode();
     updateColor();
     updateAlpha();
@@ -199,7 +207,6 @@ namespace jsk_rviz_plugins
     updateShowPolygons();
     updateNotShowSidePolygons();
     updateShowEdges();
-    updateImageTopic();
     updateUseImage();
     updateEdgeColor();
   }
@@ -673,7 +680,7 @@ namespace jsk_rviz_plugins
   void CameraInfoDisplay::updateImageTopic()
   {
     if (use_image_) {
-      std::string topic = image_topic_property_->getStdString();
+      std::string topic = image_topic_property_->getTopicStd();
       subscribeImage(topic);
     } else {
       image_sub_.shutdown();
