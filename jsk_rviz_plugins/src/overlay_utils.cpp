@@ -34,7 +34,7 @@
  *********************************************************************/
 
 #include "overlay_utils.h"
-#include <ros/ros.h>
+#include <iostream>
 
 namespace jsk_rviz_plugins
 {
@@ -136,18 +136,18 @@ namespace jsk_rviz_plugins
 
   bool OverlayObject::isTextureReady()
   {
-    return !texture_.isNull();
+    return static_cast<bool>(texture_);
   }
 
   void OverlayObject::updateTextureSize(unsigned int width, unsigned int height)
   {
     const std::string texture_name = name_ + "Texture";
     if (width == 0) {
-      ROS_WARN("[OverlayObject] width=0 is specified as texture size");
+      std::cerr << "[OverlayObject] width=0 is specified as texture size" << std::endl;
       width = 1;
     }
     if (height == 0) {
-      ROS_WARN("[OverlayObject] height=0 is specified as texture size");
+      std::cerr << "[OverlayObject] height=0 is specified as texture size" << std::endl;
       height = 1;
     }
     if (!isTextureReady() ||

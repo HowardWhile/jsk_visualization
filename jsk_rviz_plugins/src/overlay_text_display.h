@@ -35,25 +35,24 @@
 #ifndef JSK_RVIZ_PLUGIN_OVERLAY_TEXT_DISPLAY_H_
 #define JSK_RVIZ_PLUGIN_OVERLAY_TEXT_DISPLAY_H_
 
-#include "jsk_rviz_plugins/OverlayText.h"
+#include "jsk_rviz_plugins/msg/overlay_text.hpp"
 #ifndef Q_MOC_RUN
-#include <rviz/display.h>
 #include "overlay_utils.h"
 #include <OGRE/OgreColourValue.h>
 #include <OGRE/OgreMaterial.h>
-#include <std_msgs/ColorRGBA.h>
-#include <rviz/properties/ros_topic_property.h>
-#include <rviz/properties/bool_property.h>
-#include <rviz/properties/int_property.h>
-#include <rviz/properties/float_property.h>
-#include <rviz/properties/enum_property.h>
-#include <rviz/properties/color_property.h>
+#include <rviz_common/ros_topic_display.hpp>
+#include <std_msgs/msg/color_rgba.hpp>
+#include <rviz_common/properties/bool_property.hpp>
+#include <rviz_common/properties/int_property.hpp>
+#include <rviz_common/properties/float_property.hpp>
+#include <rviz_common/properties/enum_property.hpp>
+#include <rviz_common/properties/color_property.hpp>
 #endif
 
 namespace jsk_rviz_plugins
 {
   class OverlayTextDisplay
-  : public rviz::Display
+  : public rviz_common::RosTopicDisplay<jsk_rviz_plugins::msg::OverlayText>
   {
     Q_OBJECT
   public:
@@ -86,35 +85,29 @@ namespace jsk_rviz_plugins
     int left_;
     int top_;
     
-    ros::Subscriber sub_;
-    
     virtual void onInitialize();
-    virtual void subscribe();
-    virtual void unsubscribe();
     virtual void onEnable();
     virtual void onDisable();
     virtual void update(float wall_dt, float ros_dt);
 
     bool require_update_texture_;
-    rviz::RosTopicProperty* update_topic_property_;
-    rviz::BoolProperty* overtake_position_properties_property_;
-    rviz::BoolProperty* overtake_fg_color_properties_property_;
-    rviz::BoolProperty* overtake_bg_color_properties_property_;
-    rviz::BoolProperty* align_bottom_property_;
-    rviz::BoolProperty* invert_shadow_property_;
-    rviz::IntProperty* top_property_;
-    rviz::IntProperty* left_property_;
-    rviz::IntProperty* width_property_;
-    rviz::IntProperty* height_property_;
-    rviz::IntProperty* text_size_property_;
-    rviz::IntProperty* line_width_property_;
-    rviz::ColorProperty* bg_color_property_;
-    rviz::FloatProperty* bg_alpha_property_;
-    rviz::ColorProperty* fg_color_property_;
-    rviz::FloatProperty* fg_alpha_property_;
-    rviz::EnumProperty* font_property_;
+    rviz_common::properties::BoolProperty* overtake_position_properties_property_;
+    rviz_common::properties::BoolProperty* overtake_fg_color_properties_property_;
+    rviz_common::properties::BoolProperty* overtake_bg_color_properties_property_;
+    rviz_common::properties::BoolProperty* align_bottom_property_;
+    rviz_common::properties::BoolProperty* invert_shadow_property_;
+    rviz_common::properties::IntProperty* top_property_;
+    rviz_common::properties::IntProperty* left_property_;
+    rviz_common::properties::IntProperty* width_property_;
+    rviz_common::properties::IntProperty* height_property_;
+    rviz_common::properties::IntProperty* text_size_property_;
+    rviz_common::properties::IntProperty* line_width_property_;
+    rviz_common::properties::ColorProperty* bg_color_property_;
+    rviz_common::properties::FloatProperty* bg_alpha_property_;
+    rviz_common::properties::ColorProperty* fg_color_property_;
+    rviz_common::properties::FloatProperty* fg_alpha_property_;
+    rviz_common::properties::EnumProperty* font_property_;
   protected Q_SLOTS:
-    void updateTopic();
     void updateOvertakePositionProperties();
     void updateOvertakeFGColorProperties();
     void updateOvertakeBGColorProperties();
@@ -132,7 +125,7 @@ namespace jsk_rviz_plugins
     void updateFont();
     void updateLineWidth();
   private:
-    void processMessage(const jsk_rviz_plugins::OverlayText::ConstPtr& msg);
+    void processMessage(jsk_rviz_plugins::msg::OverlayText::ConstSharedPtr msg) override;
   };
 }
 

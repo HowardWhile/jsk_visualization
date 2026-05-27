@@ -1,11 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-from distutils.core import setup
-from catkin_pkg.python_setup import generate_distutils_setup
+from setuptools import setup
 
-d = generate_distutils_setup(
+setup(
+    name='jsk_rviz_plugins',
+    version='2.1.10',
     packages=['jsk_rviz_plugins'],
     package_dir={'': 'python'},
 )
-
-setup(**d)

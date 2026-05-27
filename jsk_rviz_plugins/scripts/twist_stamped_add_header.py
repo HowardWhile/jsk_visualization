@@ -1,23 +1,38 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-import rospy
 import sys
 from geometry_msgs.msg import Twist, TwistStamped
+import rclpy
+from rclpy.utilities import remove_ros_args
 
-rospy.init_node("twist_stamped_add_header")
-pub = rospy.Publisher("cmd_vel_stamped", TwistStamped)
 
-def callback(msg):
-    global pub
-    output = TwistStamped()
-    output.header.stamp = rospy.Time.now()
-    output.header.frame_id = sys.argv[1]
-    output.twist = msg
-    pub.publish(output)
+def main():
+    rclpy.init(args=sys.argv)
+    node = rclpy.create_node("twist_stamped_add_header")
+    args = remove_ros_args(args=sys.argv)[1:]
+    if len(args) != 2:
+        node.get_logger().error("Usage: twist_stamped_add_header frame_id topic")
+        node.destroy_node()
+        rclpy.shutdown()
+        return
 
-if len(sys.argv) != 3:
-    print("Usage: twist_stamped_add_header frame_id topic")
+    frame_id, topic = args
+    pub = node.create_publisher(TwistStamped, "cmd_vel_stamped", 10)
 
-sub = rospy.Subscriber(sys.argv[2], Twist, callback)
-rospy.spin()
+    def callback(msg):
+        output = TwistStamped()
+        output.header.stamp = node.get_clock().now().to_msg()
+        output.header.frame_id = frame_id
+        output.twist = msg
+        pub.publish(output)
 
+    sub = node.create_subscription(Twist, topic, callback, 10)
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,3 +1,3 @@
 geometry_msgs/PoseStamped origin
 geometry_msgs/PoseStamped goal
-geometry_msgs/Pose graspPose
+geometry_msgs/Pose grasp_pose

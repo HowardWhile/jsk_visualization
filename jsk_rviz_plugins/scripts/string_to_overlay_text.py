@@ -1,10 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-import rospy
+import rclpy
 
-from std_msgs.msg import String, Float32
+from rclpy.parameter import Parameter
+from std_msgs.msg import String
 from threading import Lock
-#from jsk_rviz_plugins.msg import OverlayText
 from jsk_rviz_plugins.overlay_text_interface import OverlayTextInterface
 
 g_lock = Lock()
@@ -20,14 +20,14 @@ def config_callback(config, level):
     g_format = config.format
     return config
 
-def publish_text(event):
+def publish_text():
     global g_lock, g_msg, g_format
     with g_lock:
         if not g_msg:
             return
         text_interface.publish(g_format.format(g_msg.data))
 
-def publish_text_multi(event):
+def publish_text_multi():
     global g_lock, multi_topic_msgs, g_format
     with g_lock:
         if all([msg for topic, msg in multi_topic_msgs.items()]):
@@ -46,17 +46,24 @@ class MultiTopicCallback():
             multi_topic_msgs[self.topic] = msg
         
 if __name__ == "__main__":
-    rospy.init_node("string_to_overlay_text")
-    text_interface = OverlayTextInterface("~output")
-    multi_topics = rospy.get_param("~multi_topics", [])
-    g_format = rospy.get_param("~format", "{0}")
-    if multi_topics:
-        subs = []
-        for topic in multi_topics:
-            callback = MultiTopicCallback(topic)
-            subs.append(rospy.Subscriber(topic, String, callback.callback))
-        rospy.Timer(rospy.Duration(0.1), publish_text_multi)
-    else:
-        sub = rospy.Subscriber("~input", String, callback)
-        rospy.Timer(rospy.Duration(0.1), publish_text)
-    rospy.spin()
+    rclpy.init()
+    node = rclpy.create_node("string_to_overlay_text")
+    text_interface = OverlayTextInterface(node, "~output")
+    node.declare_parameter("multi_topics", Parameter.Type.STRING_ARRAY)
+    node.declare_parameter("format", "{0}")
+    multi_topics = node.get_parameter("multi_topics").value
+    g_format = node.get_parameter("format").value
+    try:
+        if multi_topics:
+            subs = []
+            for topic in multi_topics:
+                multi_callback = MultiTopicCallback(topic)
+                subs.append(node.create_subscription(String, topic, multi_callback.callback, 10))
+            node.create_timer(0.1, publish_text_multi)
+        else:
+            sub = node.create_subscription(String, "~/input", callback, 10)
+            node.create_timer(0.1, publish_text)
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()

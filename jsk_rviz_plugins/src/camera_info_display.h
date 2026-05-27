@@ -38,39 +38,61 @@
 #define JSK_RVIZ_PLUGINS_CAMERA_INFO_DISPLAY_H_
 
 #ifndef Q_MOC_RUN
-#include <rviz/display.h>
-#include <rviz/message_filter_display.h>
-#include <rviz/properties/color_property.h>
-#include <rviz/properties/bool_property.h>
-#include <rviz/properties/float_property.h>
-#include <rviz/properties/ros_topic_property.h>
-#include <rviz/ogre_helpers/shape.h>
-#include <rviz/ogre_helpers/billboard_line.h>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <rviz_common/message_filter_display.hpp>
+#include <rviz_common/properties/color_property.hpp>
+#include <rviz_common/properties/bool_property.hpp>
+#include <rviz_common/properties/float_property.hpp>
+#include <rviz_common/properties/editable_enum_property.hpp>
+#include <rviz_common/ros_integration/ros_node_abstraction_iface.hpp>
+#include <rviz_rendering/objects/shape.hpp>
+#include <rviz_rendering/objects/billboard_line.hpp>
 #include <OGRE/OgreSceneNode.h>
-#include <image_geometry/pinhole_camera_model.h>
-#include <sensor_msgs/Image.h>
+#include <image_geometry/pinhole_camera_model.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp>
+#include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/camera_info.hpp>
 #include <OGRE/OgreManualObject.h>
 #include <OGRE/OgreSceneManager.h>
 #include <OGRE/OgreTextureManager.h>
 #include <OGRE/OgreTexture.h>
 #include <OGRE/OgreTechnique.h>
-#include <cv_bridge/cv_bridge.h>
-#include <sensor_msgs/image_encodings.h>
-#include <image_transport/subscriber.h>
+#include <cv_bridge/cv_bridge.hpp>
+#include <sensor_msgs/image_encodings.hpp>
+#include <image_transport/subscriber.hpp>
 
 #include "image_transport_hints_property.h"
 #endif
 
 namespace jsk_rviz_plugins
 {
+  class ImageTopicProperty : public rviz_common::properties::EditableEnumProperty
+  {
+  public:
+    ImageTopicProperty(
+      const QString& name,
+      const QString& default_value,
+      const QString& description,
+      rviz_common::properties::Property* parent,
+      const char* changed_slot);
+
+    void initialize(rviz_common::ros_integration::RosNodeAbstractionIface::WeakPtr rviz_ros_node);
+
+    std::string getTopicStd() const;
+
+  private:
+    void fillTopicList();
+
+    rviz_common::ros_integration::RosNodeAbstractionIface::WeakPtr rviz_ros_node_;
+  };
+
   class TrianglePolygon
   {
   public:
-#if ROS_VERSION_MINIMUM(1,12,0)
     typedef std::shared_ptr<TrianglePolygon> Ptr;
-#else
-    typedef boost::shared_ptr<TrianglePolygon> Ptr;
-#endif
     TrianglePolygon(Ogre::SceneManager* manager,
                     Ogre::SceneNode* node,
                     const cv::Point3d& O,
@@ -89,17 +111,12 @@ namespace jsk_rviz_plugins
   };
   
   class CameraInfoDisplay:
-    public rviz::MessageFilterDisplay<sensor_msgs::CameraInfo>
+    public rviz_common::MessageFilterDisplay<sensor_msgs::msg::CameraInfo>
   {
     Q_OBJECT
   public:
-#if ROS_VERSION_MINIMUM(1,12,0)
-    typedef std::shared_ptr<rviz::Shape> ShapePtr;
-    typedef std::shared_ptr<rviz::BillboardLine> BillboardLinePtr;
-#else
-    typedef boost::shared_ptr<rviz::Shape> ShapePtr;
-    typedef boost::shared_ptr<rviz::BillboardLine> BillboardLinePtr;
-#endif
+    typedef std::shared_ptr<rviz_rendering::Shape> ShapePtr;
+    typedef std::shared_ptr<rviz_rendering::BillboardLine> BillboardLinePtr;
     CameraInfoDisplay();
     virtual ~CameraInfoDisplay();
     
@@ -109,15 +126,15 @@ namespace jsk_rviz_plugins
     ////////////////////////////////////////////////////////
     virtual void onInitialize();
     virtual void reset();
-    virtual void processMessage(const sensor_msgs::CameraInfo::ConstPtr& msg);
+    virtual void processMessage(sensor_msgs::msg::CameraInfo::ConstSharedPtr msg);
     ////////////////////////////////////////////////////////
     // methods
     ///////////////////////////////////////////////////////
     virtual void update(float wall_dt, float ros_dt);
     virtual bool isSameCameraInfo(
-      const sensor_msgs::CameraInfo::ConstPtr& camera_info);
+      sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info);
     virtual void createCameraInfoShapes(
-      const sensor_msgs::CameraInfo::ConstPtr& camera_info);
+      sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info);
     virtual void addPointToEdge(
       const cv::Point3d& point);
     virtual void addPolygon(
@@ -125,7 +142,12 @@ namespace jsk_rviz_plugins
       bool use_color, bool upper_triangle);
     virtual void prepareMaterial();
     virtual void createTextureForBottom(int width, int height);
-    virtual void imageCallback(const sensor_msgs::Image::ConstPtr& msg);
+    virtual bool convertImageToRGB(const cv::Mat& input, const std::string& encoding, cv::Mat& output);
+    virtual bool decodeCompressedImage(
+      sensor_msgs::msg::CompressedImage::ConstSharedPtr msg, cv::Mat& output);
+    virtual void updateImage(const cv::Mat& image);
+    virtual void imageCallback(sensor_msgs::msg::Image::ConstSharedPtr msg);
+    virtual void compressedImageCallback(sensor_msgs::msg::CompressedImage::ConstSharedPtr msg);
     virtual void drawImageTexture();
     virtual void subscribeImage(std::string topic);
     /////////////////////////////////////////////////////////
@@ -133,13 +155,14 @@ namespace jsk_rviz_plugins
     //////////////////////////////////////////////////////// 
     std::vector<TrianglePolygon::Ptr> polygons_;
     BillboardLinePtr edges_;
-    sensor_msgs::CameraInfo::ConstPtr camera_info_;
+    sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info_;
     Ogre::MaterialPtr material_;
     Ogre::TexturePtr texture_;
     Ogre::MaterialPtr material_bottom_;
     Ogre::TexturePtr bottom_texture_;
     image_transport::Subscriber image_sub_;
-    boost::mutex mutex_;
+    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr compressed_image_sub_;
+    std::mutex mutex_;
     ////////////////////////////////////////////////////////
     // variables updated by rviz properties
     ////////////////////////////////////////////////////////
@@ -152,20 +175,23 @@ namespace jsk_rviz_plugins
     bool use_image_;
     bool image_updated_;
     bool not_show_side_polygons_;
+    bool depth_range_initialized_;
+    double depth_min_;
+    double depth_max_;
     cv::Mat image_;
     ////////////////////////////////////////////////////////
     // properties
     ////////////////////////////////////////////////////////
     ImageTransportHintsProperty* image_transport_hints_property_;
-    rviz::FloatProperty* far_clip_distance_property_;
-    rviz::FloatProperty* alpha_property_;
-    rviz::ColorProperty* color_property_;
-    rviz::ColorProperty* edge_color_property_;
-    rviz::BoolProperty* show_polygons_property_;
-    rviz::BoolProperty* not_show_side_polygons_property_;
-    rviz::BoolProperty* use_image_property_;
-    rviz::RosTopicProperty* image_topic_property_;
-    rviz::BoolProperty* show_edges_property_;
+    rviz_common::properties::FloatProperty* far_clip_distance_property_;
+    rviz_common::properties::FloatProperty* alpha_property_;
+    rviz_common::properties::ColorProperty* color_property_;
+    rviz_common::properties::ColorProperty* edge_color_property_;
+    rviz_common::properties::BoolProperty* show_polygons_property_;
+    rviz_common::properties::BoolProperty* not_show_side_polygons_property_;
+    rviz_common::properties::BoolProperty* use_image_property_;
+    ImageTopicProperty* image_topic_property_;
+    rviz_common::properties::BoolProperty* show_edges_property_;
     
   protected Q_SLOTS:
     void updateFarClipDistance();

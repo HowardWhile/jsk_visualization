@@ -44,6 +44,10 @@
 #include <OGRE/OgreHardwarePixelBuffer.h>
 // see OGRE/OgrePrerequisites.h
 //#define OGRE_VERSION    ((OGRE_VERSION_MAJOR << 16) | (OGRE_VERSION_MINOR << 8) | OGRE_VERSION_PATCH)
+#if defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #if OGRE_VERSION < ((1 << 16) | (9 << 8) | 0)
   #include <OGRE/OgrePanelOverlayElement.h>
   #include <OGRE/OgreOverlayElement.h>
@@ -56,11 +60,14 @@
   #include <OGRE/Overlay/OgreOverlayContainer.h>
   #include <OGRE/Overlay/OgreOverlayManager.h>
 #endif
+#if defined(__GNUC__)
+#  pragma GCC diagnostic pop
+#endif
 
 #include <QImage>
 #include <QColor>
 
-#include <ros/ros.h>
+#include <memory>
 
 namespace jsk_rviz_plugins
 {
@@ -89,11 +96,7 @@ namespace jsk_rviz_plugins
   class OverlayObject
   {
   public:
-#if ROS_VERSION_MINIMUM(1,12,0)
     typedef std::shared_ptr<OverlayObject> Ptr;
-#else
-    typedef boost::shared_ptr<OverlayObject> Ptr;
-#endif
     
     OverlayObject(const std::string& name);
     virtual ~OverlayObject();
