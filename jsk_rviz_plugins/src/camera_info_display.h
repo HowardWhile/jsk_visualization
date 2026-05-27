@@ -41,7 +41,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
-#include <rviz_common/message_filter_display.hpp>
+#include <rviz_common/ros_topic_display.hpp>
 #include <rviz_common/properties/color_property.hpp>
 #include <rviz_common/properties/bool_property.hpp>
 #include <rviz_common/properties/float_property.hpp>
@@ -119,7 +119,7 @@ namespace jsk_rviz_plugins
   };
   
   class CameraInfoDisplay:
-    public rviz_common::MessageFilterDisplay<sensor_msgs::msg::CameraInfo>
+    public rviz_common::RosTopicDisplay<sensor_msgs::msg::CameraInfo>
   {
     Q_OBJECT
   public:

@@ -249,7 +249,7 @@ namespace jsk_rviz_plugins
 
   void CameraInfoDisplay::reset()
   {
-    MFDClass::reset();
+    RTDClass::reset();
     if (edges_) {
       edges_->clear();
     }
@@ -259,7 +259,7 @@ namespace jsk_rviz_plugins
 
   void CameraInfoDisplay::onInitialize()
   {
-    MFDClass::onInitialize();
+    RTDClass::onInitialize();
     image_topic_property_->initialize(context_->getRosNodeAbstraction());
     scene_node_ = scene_manager_->getRootSceneNode()->createChildSceneNode();
     updateColor();
@@ -282,11 +282,20 @@ namespace jsk_rviz_plugins
      Ogre::Vector3 position;
      Ogre::Quaternion quaternion;
      std::string frame_id = msg->header.frame_id;
+     if (frame_id.empty()) {
+       setStatus(rviz_common::properties::StatusProperty::Error,
+                 "Transform",
+                 "Camera info frame_id is empty");
+       return;
+     }
      if (frame_id[0] == '/') {
        frame_id = frame_id.substr(1, frame_id.size());
      }
      if(!context_->getFrameManager()->getTransform(frame_id,
                                                    rclcpp::Time(msg->header.stamp, RCL_ROS_TIME),
+                                                   position,
+                                                   quaternion) &&
+        !context_->getFrameManager()->getTransform(frame_id,
                                                    position,
                                                    quaternion)) {
        setStatus(rviz_common::properties::StatusProperty::Error,
@@ -294,7 +303,9 @@ namespace jsk_rviz_plugins
                  QString("Error transforming camera info from frame '%1' to frame '%2'")
                    .arg(QString::fromStdString(msg->header.frame_id))
                    .arg(fixed_frame_));
+       return;
      }
+     setStatus(rviz_common::properties::StatusProperty::Ok, "Transform", "OK");
      scene_node_->setPosition(position);
      scene_node_->setOrientation(quaternion);
      camera_info_ = msg;        // store for caching
