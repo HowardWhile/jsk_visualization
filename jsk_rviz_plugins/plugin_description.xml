@@ -16,6 +16,22 @@
     </description>
   </class>
   <class
+    name="jsk_rviz_plugins/PieChart"
+    type="jsk_rviz_plugins::PieChartDisplay"
+    base_class_type="rviz_common::Display">
+    <description>
+      Displays std_msgs/msg/Float32 as a 2D pie chart overlay in RViz2.
+    </description>
+  </class>
+  <class
+    name="jsk_rviz_plugins/String"
+    type="jsk_rviz_plugins::StringDisplay"
+    base_class_type="rviz_common::Display">
+    <description>
+      Displays std_msgs/msg/String as a 2D overlay in RViz2.
+    </description>
+  </class>
+  <class
     name="jsk_rviz_plugins/TFTrajectory"
     type="jsk_rviz_plugins::TFTrajectoryDisplay"
     base_class_type="rviz_common::Display">

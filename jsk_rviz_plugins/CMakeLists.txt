@@ -41,6 +41,8 @@ qt5_wrap_cpp(jsk_rviz_plugins_moc_files
   src/camera_info_display.h
   src/image_transport_hints_property.h
   src/overlay_text_display.h
+  src/pie_chart_display.h
+  src/string_display.h
   src/tf_trajectory_display.h
 )
 
@@ -49,6 +51,8 @@ add_library(${PROJECT_NAME}_display_plugins SHARED
   src/image_transport_hints_property.cpp
   src/overlay_text_display.cpp
   src/overlay_utils.cpp
+  src/pie_chart_display.cpp
+  src/string_display.cpp
   src/tf_trajectory_display.cpp
   ${jsk_rviz_plugins_moc_files}
 )
