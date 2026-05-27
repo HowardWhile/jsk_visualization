@@ -175,6 +175,9 @@ namespace jsk_rviz_plugins
     bool use_image_;
     bool image_updated_;
     bool not_show_side_polygons_;
+    bool depth_range_initialized_;
+    double depth_min_;
+    double depth_max_;
     cv::Mat image_;
     ////////////////////////////////////////////////////////
     // properties

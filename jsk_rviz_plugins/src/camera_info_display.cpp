@@ -49,6 +49,7 @@
 #include <cmath>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <vector>
 
 namespace enc = sensor_msgs::image_encodings;
 
@@ -172,7 +173,10 @@ namespace jsk_rviz_plugins
       show_edges_(true),
       use_image_(false),
       image_updated_(true),
-      not_show_side_polygons_(true)
+      not_show_side_polygons_(true),
+      depth_range_initialized_(false),
+      depth_min_(0.0),
+      depth_max_(0.0)
   {
     ////////////////////////////////////////////////////////
     // initialize properties
@@ -443,6 +447,7 @@ namespace jsk_rviz_plugins
       return;
     }
     auto node = node_interface->get_raw_node();
+    depth_range_initialized_ = false;
     if (topic.rfind("/compressed") == topic.size() - std::string("/compressed").size() ||
         topic.rfind("/compressedDepth") == topic.size() - std::string("/compressedDepth").size()) {
       compressed_image_sub_ = node->create_subscription<sensor_msgs::msg::CompressedImage>(
@@ -529,27 +534,64 @@ namespace jsk_rviz_plugins
       im.convertTo(output, CV_8U, 1 / 256.0);
       cv::cvtColor(output, output, cv::COLOR_GRAY2RGB);
     } else if (has_depth_encoding || im.channels() == 1) {
+      cv::Mat depth_float;
+      im.convertTo(depth_float, CV_32F);
       cv::Mat finite_mask;
-      if (im.depth() == CV_32F || im.depth() == CV_64F) {
-        finite_mask = im == im;
+      if (depth_float.depth() == CV_32F || depth_float.depth() == CV_64F) {
+        finite_mask = depth_float == depth_float;
       } else {
-        finite_mask = cv::Mat(im.rows, im.cols, CV_8U, cv::Scalar(255));
+        finite_mask = cv::Mat(depth_float.rows, depth_float.cols, CV_8U, cv::Scalar(255));
       }
-      cv::Mat nonzero_mask = im != 0;
+      cv::Mat nonzero_mask = depth_float != 0;
       cv::Mat valid_mask;
       cv::bitwise_and(finite_mask, nonzero_mask, valid_mask);
       double min_value = 0.0;
       double max_value = 0.0;
-      cv::minMaxLoc(im, &min_value, &max_value, nullptr, nullptr, valid_mask);
-      cv::Mat gray;
-      if (max_value > min_value) {
-        im.convertTo(gray, CV_8U, 255.0 / (max_value - min_value),
-                     -min_value * 255.0 / (max_value - min_value));
-      } else {
-        gray = cv::Mat(im.rows, im.cols, CV_8U, cv::Scalar(0));
+      std::vector<float> valid_depths;
+      valid_depths.reserve(cv::countNonZero(valid_mask));
+      for (int y = 0; y < im.rows; ++y) {
+        for (int x = 0; x < im.cols; ++x) {
+          if (!valid_mask.at<uint8_t>(y, x)) {
+            continue;
+          }
+          valid_depths.push_back(depth_float.at<float>(y, x));
+        }
       }
-      gray.setTo(0, ~valid_mask);
-      cv::cvtColor(gray, output, cv::COLOR_GRAY2RGB);
+      if (valid_depths.size() >= 20) {
+        const size_t low_index = valid_depths.size() * 2 / 100;
+        const size_t high_index = valid_depths.size() * 98 / 100;
+        std::nth_element(valid_depths.begin(), valid_depths.begin() + low_index, valid_depths.end());
+        min_value = valid_depths[low_index];
+        std::nth_element(valid_depths.begin(), valid_depths.begin() + high_index, valid_depths.end());
+        max_value = valid_depths[high_index];
+      } else {
+        cv::minMaxLoc(depth_float, &min_value, &max_value, nullptr, nullptr, valid_mask);
+      }
+      if (max_value > min_value) {
+        if (!depth_range_initialized_) {
+          depth_min_ = min_value;
+          depth_max_ = max_value;
+          depth_range_initialized_ = true;
+        } else {
+          const double smoothing = 0.9;
+          depth_min_ = depth_min_ * smoothing + min_value * (1.0 - smoothing);
+          depth_max_ = depth_max_ * smoothing + max_value * (1.0 - smoothing);
+        }
+        min_value = depth_min_;
+        max_value = depth_max_;
+      }
+      cv::Mat normalized_depth;
+      if (max_value > min_value) {
+        depth_float.convertTo(normalized_depth, CV_8U, -255.0 / (max_value - min_value),
+                              max_value * 255.0 / (max_value - min_value));
+      } else {
+        normalized_depth = cv::Mat(im.rows, im.cols, CV_8U, cv::Scalar(0));
+      }
+      normalized_depth.setTo(0, ~valid_mask);
+      cv::Mat colorized_depth;
+      cv::applyColorMap(normalized_depth, colorized_depth, cv::COLORMAP_TURBO);
+      colorized_depth.setTo(cv::Scalar(0, 0, 0), ~valid_mask);
+      cv::cvtColor(colorized_depth, output, cv::COLOR_BGR2RGB);
     } else if (im.channels() == 3) {
       cv::cvtColor(im, output, cv::COLOR_BGR2RGB);
     } else if (im.channels() == 4) {
