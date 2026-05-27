@@ -45,11 +45,69 @@
 #include <OGRE/OgreHardwarePixelBuffer.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/image_encodings.hpp>
+#include <algorithm>
+#include <cmath>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 
 namespace enc = sensor_msgs::image_encodings;
 
 namespace jsk_rviz_plugins
 {
+  ImageTopicProperty::ImageTopicProperty(
+    const QString& name,
+    const QString& default_value,
+    const QString& description,
+    rviz_common::properties::Property* parent,
+    const char* changed_slot)
+    : rviz_common::properties::EditableEnumProperty(
+        name, default_value, description, parent, changed_slot)
+  {
+    QObject::connect(
+      this,
+      &rviz_common::properties::EditableEnumProperty::requestOptions,
+      this,
+      [this](rviz_common::properties::EditableEnumProperty*) {
+        fillTopicList();
+      });
+  }
+
+  void ImageTopicProperty::initialize(
+    rviz_common::ros_integration::RosNodeAbstractionIface::WeakPtr rviz_ros_node)
+  {
+    rviz_ros_node_ = rviz_ros_node;
+  }
+
+  std::string ImageTopicProperty::getTopicStd() const
+  {
+    return getStdString();
+  }
+
+  void ImageTopicProperty::fillTopicList()
+  {
+    clearOptions();
+    auto node_interface = rviz_ros_node_.lock();
+    if (!node_interface) {
+      return;
+    }
+
+    const auto node = node_interface->get_raw_node();
+    const auto topic_names_and_types = node->get_topic_names_and_types();
+    std::set<std::string> image_topics;
+    for (const auto& topic_and_types : topic_names_and_types) {
+      for (const auto& type : topic_and_types.second) {
+        if (type == rosidl_generator_traits::name<sensor_msgs::msg::Image>() ||
+            type == rosidl_generator_traits::name<sensor_msgs::msg::CompressedImage>()) {
+          image_topics.insert(topic_and_types.first);
+        }
+      }
+    }
+
+    for (const auto& topic : image_topics) {
+      addOptionStd(topic);
+    }
+  }
+
   TrianglePolygon::TrianglePolygon(
     Ogre::SceneManager* manager,
     Ogre::SceneNode* node,
@@ -144,10 +202,9 @@ namespace jsk_rviz_plugins
       false,
       "use image as texture",
       this, SLOT(updateUseImage()));
-    image_topic_property_ = new rviz_common::properties::RosTopicProperty(
+    image_topic_property_ = new ImageTopicProperty(
       "Image Topic", "",
-      QString::fromStdString(rosidl_generator_traits::name<sensor_msgs::msg::Image>()),
-      "sensor_msgs::Image topic to subscribe to.",
+      "sensor_msgs::msg::Image or sensor_msgs::msg::CompressedImage topic to subscribe to.",
       this, SLOT( updateImageTopic() ));
     image_topic_property_->hide();
     image_transport_hints_property_ = new ImageTransportHintsProperty(
@@ -375,6 +432,7 @@ namespace jsk_rviz_plugins
   {
 
     image_sub_.shutdown();
+    compressed_image_sub_.reset();
     if (topic.empty()) {
       setStatus(rviz_common::properties::StatusProperty::Warn, "Image Topic", "Topic name is empty");
       return;
@@ -385,12 +443,20 @@ namespace jsk_rviz_plugins
       return;
     }
     auto node = node_interface->get_raw_node();
+    if (topic.rfind("/compressed") == topic.size() - std::string("/compressed").size() ||
+        topic.rfind("/compressedDepth") == topic.size() - std::string("/compressedDepth").size()) {
+      compressed_image_sub_ = node->create_subscription<sensor_msgs::msg::CompressedImage>(
+        topic,
+        rclcpp::SensorDataQoS(),
+        std::bind(&CameraInfoDisplay::compressedImageCallback, this, std::placeholders::_1));
+      return;
+    }
     image_sub_ = image_transport::create_subscription(
       node.get(),
       topic,
       std::bind(&CameraInfoDisplay::imageCallback, this, std::placeholders::_1),
       image_transport_hints_property_->getTransport(),
-      rmw_qos_profile_default);
+      rmw_qos_profile_sensor_data);
   }
 
   void CameraInfoDisplay::drawImageTexture()
@@ -425,6 +491,157 @@ namespace jsk_rviz_plugins
     bottom_texture_->getBuffer()->unlock();
   }
 
+  bool CameraInfoDisplay::convertImageToRGB(
+    const cv::Mat& input, const std::string& encoding, cv::Mat& output)
+  {
+    if (input.empty()) {
+      setStatus(rviz_common::properties::StatusProperty::Error, "Image", "Decoded image is empty");
+      return false;
+    }
+
+    cv::Mat im = input;
+    const bool has_depth_encoding =
+      encoding == enc::TYPE_16UC1 || encoding == enc::TYPE_32FC1 ||
+      encoding == "16UC1" || encoding == "32FC1";
+
+    if (encoding == enc::BGRA8) {
+      cv::cvtColor(im, output, cv::COLOR_BGRA2RGB);
+    } else if (encoding == enc::BGRA16) {
+      im.convertTo(output, CV_8U, 1 / 256.0);
+      cv::cvtColor(output, output, cv::COLOR_BGRA2RGB);
+    } else if (encoding == enc::BGR8) {
+      cv::cvtColor(im, output, cv::COLOR_BGR2RGB);
+    } else if (encoding == enc::BGR16) {
+      im.convertTo(output, CV_8U, 1 / 256.0);
+      cv::cvtColor(output, output, cv::COLOR_BGR2RGB);
+    } else if (encoding == enc::RGBA8) {
+      cv::cvtColor(im, output, cv::COLOR_RGBA2RGB);
+    } else if (encoding == enc::RGBA16) {
+      im.convertTo(output, CV_8U, 1 / 256.0);
+      cv::cvtColor(output, output, cv::COLOR_RGBA2RGB);
+    } else if (encoding == enc::RGB8) {
+      output = im.clone();
+    } else if (encoding == enc::RGB16) {
+      im.convertTo(output, CV_8U, 1 / 256.0);
+    } else if (encoding == enc::MONO8) {
+      cv::cvtColor(im, output, cv::COLOR_GRAY2RGB);
+    } else if (encoding == enc::MONO16) {
+      im.convertTo(output, CV_8U, 1 / 256.0);
+      cv::cvtColor(output, output, cv::COLOR_GRAY2RGB);
+    } else if (has_depth_encoding || im.channels() == 1) {
+      cv::Mat finite_mask;
+      if (im.depth() == CV_32F || im.depth() == CV_64F) {
+        finite_mask = im == im;
+      } else {
+        finite_mask = cv::Mat(im.rows, im.cols, CV_8U, cv::Scalar(255));
+      }
+      cv::Mat nonzero_mask = im != 0;
+      cv::Mat valid_mask;
+      cv::bitwise_and(finite_mask, nonzero_mask, valid_mask);
+      double min_value = 0.0;
+      double max_value = 0.0;
+      cv::minMaxLoc(im, &min_value, &max_value, nullptr, nullptr, valid_mask);
+      cv::Mat gray;
+      if (max_value > min_value) {
+        im.convertTo(gray, CV_8U, 255.0 / (max_value - min_value),
+                     -min_value * 255.0 / (max_value - min_value));
+      } else {
+        gray = cv::Mat(im.rows, im.cols, CV_8U, cv::Scalar(0));
+      }
+      gray.setTo(0, ~valid_mask);
+      cv::cvtColor(gray, output, cv::COLOR_GRAY2RGB);
+    } else if (im.channels() == 3) {
+      cv::cvtColor(im, output, cv::COLOR_BGR2RGB);
+    } else if (im.channels() == 4) {
+      cv::cvtColor(im, output, cv::COLOR_BGRA2RGB);
+    } else {
+      setStatus(rviz_common::properties::StatusProperty::Error,
+                "Image", QString("Unsupported image encoding '%1'")
+                  .arg(QString::fromStdString(encoding)));
+      return false;
+    }
+    return true;
+  }
+
+  bool CameraInfoDisplay::decodeCompressedImage(
+    sensor_msgs::msg::CompressedImage::ConstSharedPtr msg, cv::Mat& output)
+  {
+    std::vector<uint8_t> data = msg->data;
+    if (msg->format.find("compressedDepth") != std::string::npos) {
+      const std::vector<uint8_t> png_signature = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
+      auto png_begin = std::search(data.begin(), data.end(), png_signature.begin(), png_signature.end());
+      if (png_begin == data.end()) {
+        setStatus(rviz_common::properties::StatusProperty::Error,
+                  "Image", "Failed to find PNG payload in compressedDepth image");
+        return false;
+      }
+      data.erase(data.begin(), png_begin);
+    }
+
+    cv::Mat encoded(1, static_cast<int>(data.size()), CV_8UC1, data.data());
+    cv::Mat decoded = cv::imdecode(encoded, cv::IMREAD_UNCHANGED);
+    if (decoded.empty()) {
+      setStatus(rviz_common::properties::StatusProperty::Error,
+                "Image", "Failed to decode compressed image");
+      return false;
+    }
+
+    std::string encoding = msg->format;
+    const size_t separator = encoding.find(';');
+    if (separator != std::string::npos) {
+      encoding = encoding.substr(0, separator);
+    }
+    const size_t compressed_pixel_format = msg->format.find("compressed ");
+    if (compressed_pixel_format != std::string::npos &&
+        msg->format.find("compressedDepth") == std::string::npos) {
+      encoding = msg->format.substr(compressed_pixel_format + std::string("compressed ").size());
+    }
+    if (encoding.empty() || encoding.find("jpeg") != std::string::npos ||
+        encoding.find("png") != std::string::npos) {
+      encoding = decoded.channels() == 1 ? enc::MONO8 : enc::BGR8;
+    }
+    return convertImageToRGB(decoded, encoding, output);
+  }
+
+  void CameraInfoDisplay::updateImage(const cv::Mat& image)
+  {
+    int roi_height = camera_info_->roi.height ? camera_info_->roi.height : camera_info_->height;
+    int roi_width = camera_info_->roi.width ? camera_info_->roi.width : camera_info_->width;
+    if (camera_info_->binning_y > 0) {
+      roi_height /= camera_info_->binning_y;
+    }
+    if (camera_info_->binning_x > 0) {
+      roi_width /= camera_info_->binning_x;
+    }
+
+    if (image.cols == static_cast<int>(camera_info_->width) &&
+        image.rows == static_cast<int>(camera_info_->height)) {
+      cv::Rect roi(camera_info_->roi.x_offset, camera_info_->roi.y_offset,
+                   camera_info_->roi.width ? camera_info_->roi.width : camera_info_->width,
+                   camera_info_->roi.height ? camera_info_->roi.height : camera_info_->height);
+      image_ = cv::Mat(image, roi).clone();
+    } else if (image.cols == roi_width && image.rows == roi_height) {
+      image_ = image.clone();
+    } else {
+      setStatus(rviz_common::properties::StatusProperty::Error,
+                "Image", QString("Invalid image size (%1, %2), expected (%3, %4) or ROI size (%5, %6)")
+                  .arg(image.cols).arg(image.rows)
+                  .arg(camera_info_->width).arg(camera_info_->height)
+                  .arg(roi_width).arg(roi_height));
+      return;
+    }
+
+    if (!bottom_texture_
+        || bottom_texture_->getWidth() != image_.cols
+        || bottom_texture_->getHeight() != image_.rows) {
+      createTextureForBottom(image_.cols, image_.rows);
+      if (camera_info_) {
+        createCameraInfoShapes(camera_info_);
+      }
+    }
+    image_updated_ = true;
+  }
+
   // convert sensor_msgs::Image into cv::Mat
   void CameraInfoDisplay::imageCallback(
       sensor_msgs::msg::Image::ConstSharedPtr msg)
@@ -437,78 +654,29 @@ namespace jsk_rviz_plugins
     try
     {
       cv_ptr = cv_bridge::toCvShare(msg);
-      cv::Mat im = cv_ptr->image.clone();
-      if (msg->encoding == enc::BGRA8) {
-        cv::cvtColor(im, im, cv::COLOR_BGRA2RGB);
-      } else if (msg->encoding == enc::BGRA16) {
-        im.convertTo(im, CV_8U, 1 / 256.0);
-        cv::cvtColor(im, im, cv::COLOR_BGRA2RGB);
-      } else if (msg->encoding == enc::BGR8) {
-        cv::cvtColor(im, im, cv::COLOR_BGR2RGB);
-      } else if (msg->encoding == enc::BGR16) {
-        im.convertTo(im, CV_8U, 1 / 256.0);
-        cv::cvtColor(im, im, cv::COLOR_BGR2RGB);
-      } else if (msg->encoding == enc::RGBA8) {
-        cv::cvtColor(im, im, cv::COLOR_RGBA2RGB);
-      } else if (msg->encoding == enc::RGBA16) {
-        im.convertTo(im, CV_8U, 1 / 256.0);
-        cv::cvtColor(im, im, cv::COLOR_RGBA2RGB);
-      } else if (msg->encoding == enc::RGB8) {
-        // nothing
-      } else if (msg->encoding == enc::RGB16) {
-        im.convertTo(im, CV_8U, 1 / 256.0);
-      } else if (msg->encoding == enc::MONO8) {
-        cv::cvtColor(im, im, cv::COLOR_GRAY2RGB);
-      } else if (msg->encoding == enc::MONO16) {
-        im.convertTo(im, CV_8U, 1 / 256.0);
-        cv::cvtColor(im, im, cv::COLOR_GRAY2RGB);
-      } else {
-        setStatus(rviz_common::properties::StatusProperty::Error,
-                  "Image", QString("Unsupported image encoding '%1'")
-                    .arg(QString::fromStdString(msg->encoding)));
+      cv::Mat rgb_image;
+      if (!convertImageToRGB(cv_ptr->image, msg->encoding, rgb_image)) {
         return;
       }
-
-      int roi_height = camera_info_->roi.height ? camera_info_->roi.height : camera_info_->height;
-      int roi_width = camera_info_->roi.width ? camera_info_->roi.width : camera_info_->width;
-      if (camera_info_->binning_y > 0) {
-        roi_height /= camera_info_->binning_y;
-      }
-      if (camera_info_->binning_x > 0) {
-        roi_width /= camera_info_->binning_x;
-      }
-
-      if (im.cols == camera_info_->width && im.rows == camera_info_->height) {
-        cv::Rect roi(camera_info_->roi.x_offset, camera_info_->roi.y_offset,
-                     camera_info_->roi.width ? camera_info_->roi.width : camera_info_->width,
-                     camera_info_->roi.height ? camera_info_->roi.height : camera_info_->height);
-        image_ = cv::Mat(im, roi).clone();
-      } else if (im.cols == roi_width && im.rows == roi_height) {
-        image_ = im.clone();
-      } else {
-        setStatus(rviz_common::properties::StatusProperty::Error,
-                  "Image", QString("Invalid image size (%1, %2), expected (%3, %4) or ROI size (%5, %6)")
-                    .arg(im.cols).arg(im.rows)
-                    .arg(camera_info_->width).arg(camera_info_->height)
-                    .arg(roi_width).arg(roi_height));
-        return;
-      }
-
-      // check the size of bottom texture
-      if (!bottom_texture_
-          || bottom_texture_->getWidth() != image_.cols
-          || bottom_texture_->getHeight() != image_.rows) {
-        createTextureForBottom(image_.cols, image_.rows);
-        if (camera_info_) {
-          createCameraInfoShapes(camera_info_);
-        }
-      }
-      image_updated_ = true;
+      updateImage(rgb_image);
     }
     catch (cv_bridge::Exception& e)
     {
       setStatus(rviz_common::properties::StatusProperty::Error,
                 "Image", QString("cv_bridge exception: ") + e.what());
+    }
+  }
+
+  void CameraInfoDisplay::compressedImageCallback(
+      sensor_msgs::msg::CompressedImage::ConstSharedPtr msg)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!camera_info_) {
+      return;
+    }
+    cv::Mat rgb_image;
+    if (decodeCompressedImage(msg, rgb_image)) {
+      updateImage(rgb_image);
     }
   }
 
