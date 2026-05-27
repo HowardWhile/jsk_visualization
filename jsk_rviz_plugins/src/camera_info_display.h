@@ -48,7 +48,11 @@
 #include <rviz_rendering/objects/shape.hpp>
 #include <rviz_rendering/objects/billboard_line.hpp>
 #include <OGRE/OgreSceneNode.h>
+#if __has_include(<image_geometry/pinhole_camera_model.hpp>)
 #include <image_geometry/pinhole_camera_model.hpp>
+#else
+#include <image_geometry/pinhole_camera_model.h>
+#endif
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <OGRE/OgreManualObject.h>
@@ -56,7 +60,11 @@
 #include <OGRE/OgreTextureManager.h>
 #include <OGRE/OgreTexture.h>
 #include <OGRE/OgreTechnique.h>
+#if __has_include(<cv_bridge/cv_bridge.hpp>)
 #include <cv_bridge/cv_bridge.hpp>
+#else
+#include <cv_bridge/cv_bridge.h>
+#endif
 #include <sensor_msgs/image_encodings.hpp>
 #include <image_transport/subscriber.hpp>
 
