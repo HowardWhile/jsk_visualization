@@ -82,6 +82,8 @@ private:
   void processLoadRequest();
   void processUnloadRequest();
   void pollServiceFutures();
+  std::string resolveLoadServiceName();
+  std::string resolveUnloadServiceName() const;
   std::string unloadServiceName() const;
   LoadNode::Request::SharedPtr makeLoadRequest() const;
   void configurePointCloudDisplay();
@@ -107,6 +109,7 @@ private:
   bool unload_requested_;
   bool load_after_unload_;
   float retry_elapsed_;
+  std::string active_load_service_name_;
 };
 
 }  // namespace jsk_rviz_plugins

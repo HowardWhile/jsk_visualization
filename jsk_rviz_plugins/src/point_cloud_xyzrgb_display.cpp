@@ -26,6 +26,7 @@ constexpr const char* kPointCloud2Type = "sensor_msgs/msg/PointCloud2";
 constexpr const char* kDefaultRgbImage = "/camera/color/image_raw";
 constexpr const char* kDefaultRgbInfo = "/camera/color/camera_info";
 constexpr const char* kDefaultDepthImage = "/camera/depth/image_raw";
+constexpr const char* kDefaultDepthInfo = "/camera/depth/camera_info";
 constexpr const char* kDefaultOutput = "/camera/color/points_xyzrgb";
 constexpr const char* kDefaultLoadService = "/camera_processor_container/_container/load_node";
 
@@ -106,7 +107,8 @@ PointCloudXyzrgbDisplay::PointCloudXyzrgbDisplay()
     load_requested_(false),
     unload_requested_(false),
     load_after_unload_(false),
-    retry_elapsed_(0.0f)
+    retry_elapsed_(0.0f),
+    active_load_service_name_()
 {
   rgb_image_property_ = new PointCloudXyzrgbTopicProperty(
     "Color Image", kDefaultRgbImage, "RGB image topic.",
@@ -118,7 +120,7 @@ PointCloudXyzrgbDisplay::PointCloudXyzrgbDisplay()
     "Depth Image", kDefaultDepthImage, "Depth image topic.",
     kImageType, this, SLOT(updateConfiguration()));
   depth_info_property_ = new PointCloudXyzrgbTopicProperty(
-    "Depth Camera Info", kDefaultRgbInfo, "CameraInfo topic for the registered depth image.",
+    "Depth Camera Info", kDefaultDepthInfo, "CameraInfo topic for the registered depth image.",
     kCameraInfoType, this, SLOT(updateConfiguration()));
   output_topic_property_ = new rviz_common::properties::StringProperty(
     "Point Cloud Output", kDefaultOutput, "Generated sensor_msgs/msg/PointCloud2 topic.",
@@ -239,11 +241,19 @@ void PointCloudXyzrgbDisplay::processLoadRequest()
   retry_elapsed_ = 0.0f;
 
   if (!load_client_) {
-    load_client_ = node_->create_client<LoadNode>(container_service_property_->getStdString());
+    active_load_service_name_ = resolveLoadServiceName();
+    if (active_load_service_name_.empty()) {
+      setDisplayStatus(
+        rviz_common::properties::StatusProperty::Warn,
+        "No component container load service found. Start camera_processor_container or set Container Load Service.");
+      return;
+    }
+    load_client_ = node_->create_client<LoadNode>(active_load_service_name_);
   }
   if (!load_client_->service_is_ready()) {
     setDisplayStatus(
-      rviz_common::properties::StatusProperty::Warn, "Container load service is not ready");
+      rviz_common::properties::StatusProperty::Warn,
+      QString("Container load service is not ready: %1").arg(QString::fromStdString(active_load_service_name_)));
     return;
   }
 
@@ -270,7 +280,7 @@ void PointCloudXyzrgbDisplay::processUnloadRequest()
   retry_elapsed_ = 0.0f;
 
   if (!unload_client_) {
-    unload_client_ = node_->create_client<UnloadNode>(unloadServiceName());
+    unload_client_ = node_->create_client<UnloadNode>(resolveUnloadServiceName());
   }
   if (!unload_client_->service_is_ready()) {
     setDisplayStatus(
@@ -322,6 +332,51 @@ void PointCloudXyzrgbDisplay::pollServiceFutures()
         QString("Stop failed: %1").arg(QString::fromStdString(response->error_message)));
     }
   }
+}
+
+std::string PointCloudXyzrgbDisplay::resolveLoadServiceName()
+{
+  const std::string configured_service = container_service_property_->getStdString();
+  const auto service_names_and_types = node_->get_service_names_and_types();
+
+  const auto has_load_node_type = [](const std::vector<std::string>& types) {
+    return std::find(
+      types.begin(), types.end(), "composition_interfaces/srv/LoadNode") != types.end();
+  };
+
+  for (const auto& service_and_types : service_names_and_types) {
+    if (service_and_types.first == configured_service && has_load_node_type(service_and_types.second)) {
+      return configured_service;
+    }
+  }
+
+  for (const auto& service_and_types : service_names_and_types) {
+    if (service_and_types.first.find("/_container/load_node") == std::string::npos) {
+      continue;
+    }
+    if (!has_load_node_type(service_and_types.second)) {
+      continue;
+    }
+
+    container_service_property_->blockSignals(true);
+    container_service_property_->setString(QString::fromStdString(service_and_types.first));
+    container_service_property_->blockSignals(false);
+    return service_and_types.first;
+  }
+
+  return std::string();
+}
+
+std::string PointCloudXyzrgbDisplay::resolveUnloadServiceName() const
+{
+  std::string service = active_load_service_name_.empty() ?
+    container_service_property_->getStdString() : active_load_service_name_;
+  const std::string suffix = "/load_node";
+  if (service.size() >= suffix.size() &&
+      service.compare(service.size() - suffix.size(), suffix.size(), suffix) == 0) {
+    service.replace(service.size() - suffix.size(), suffix.size(), "/unload_node");
+  }
+  return service;
 }
 
 std::string PointCloudXyzrgbDisplay::unloadServiceName() const

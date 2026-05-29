@@ -17,7 +17,7 @@ Visualization Manager:
       Color Camera Info: /camera/color/camera_info
       Color Image: /camera/color/image_raw
       Container Load Service: /camera_processor_container/_container/load_node
-      Depth Camera Info: /camera/color/camera_info
+      Depth Camera Info: /camera/depth/camera_info
       Depth Image: /camera/depth/image_raw
       Enabled: true
       Exact Sync: false
