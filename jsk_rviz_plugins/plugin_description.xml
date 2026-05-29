@@ -24,6 +24,15 @@
     </description>
   </class>
   <class
+    name="jsk_rviz_plugins/PointCloudXyzrgb"
+    type="jsk_rviz_plugins::PointCloudXyzrgbDisplay"
+    base_class_type="rviz_common::Display">
+    <description>
+      Selects RGB-D image and camera info topics, loads depth_image_proc::PointCloudXyzrgbNode,
+      and adds a PointCloud2 display in RViz2.
+    </description>
+  </class>
+  <class
     name="jsk_rviz_plugins/String"
     type="jsk_rviz_plugins::StringDisplay"
     base_class_type="rviz_common::Display">
