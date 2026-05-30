@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.8)
 project(jsk_rviz_plugins)
 
 find_package(ament_cmake REQUIRED)
-find_package(composition_interfaces REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(image_geometry REQUIRED)
@@ -13,7 +12,6 @@ find_package(Qt5 REQUIRED COMPONENTS Widgets)
 find_package(rclcpp REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(rviz_common REQUIRED)
-find_package(rviz_default_plugins REQUIRED)
 find_package(rviz_ogre_vendor REQUIRED)
 find_package(rviz_rendering REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -72,21 +70,18 @@ target_link_libraries(${PROJECT_NAME}_display_plugins
   ${cpp_typesupport_target}
   Qt5::Widgets
   rviz_common::rviz_common
-  rviz_default_plugins::rviz_default_plugins
   rviz_ogre_vendor::OgreMain
   rviz_ogre_vendor::OgreOverlay
   rviz_rendering::rviz_rendering
 )
 
 ament_target_dependencies(${PROJECT_NAME}_display_plugins
-  composition_interfaces
   cv_bridge
   image_geometry
   image_transport
   pluginlib
   rclcpp
   rviz_common
-  rviz_default_plugins
   rviz_ogre_vendor
   rviz_rendering
   sensor_msgs

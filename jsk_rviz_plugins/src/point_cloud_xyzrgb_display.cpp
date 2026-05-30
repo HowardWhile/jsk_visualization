@@ -9,11 +9,15 @@
 #include "point_cloud_xyzrgb_display.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <set>
 
+#include <OGRE/OgreSceneNode.h>
 #include <pluginlib/class_list_macros.hpp>
-#include <rcl_interfaces/msg/parameter.hpp>
-#include <rviz_common/properties/property.hpp>
+#include <rviz_common/display_context.hpp>
+#include <rviz_common/frame_manager_iface.hpp>
+#include <sensor_msgs/image_encodings.hpp>
 
 namespace jsk_rviz_plugins
 {
@@ -22,18 +26,14 @@ namespace
 {
 constexpr const char* kImageType = "sensor_msgs/msg/Image";
 constexpr const char* kCameraInfoType = "sensor_msgs/msg/CameraInfo";
-constexpr const char* kPointCloud2Type = "sensor_msgs/msg/PointCloud2";
 constexpr const char* kDefaultRgbImage = "/camera/color/image_raw";
 constexpr const char* kDefaultRgbInfo = "/camera/color/camera_info";
 constexpr const char* kDefaultDepthImage = "/camera/depth/image_raw";
 constexpr const char* kDefaultDepthInfo = "/camera/depth/camera_info";
-constexpr const char* kDefaultOutput = "/camera/color/points_xyzrgb";
-constexpr const char* kDefaultLoadService = "/camera_processor_container/_container/load_node";
 
-rcl_interfaces::msg::Parameter makeParameter(
-  const std::string& name, const rclcpp::ParameterValue& value)
+bool hasEncoding(const sensor_msgs::msg::Image& image, const std::string& encoding)
 {
-  return rclcpp::Parameter(name, value).to_parameter_msg();
+  return image.encoding == encoding;
 }
 }  // namespace
 
@@ -93,22 +93,17 @@ void PointCloudXyzrgbTopicProperty::fillTopicList()
 }
 
 PointCloudXyzrgbDisplay::PointCloudXyzrgbDisplay()
-  : rviz_default_plugins::displays::PointCloud2Display(),
+  : rviz_common::Display(),
     rgb_image_property_(nullptr),
     rgb_info_property_(nullptr),
     depth_image_property_(nullptr),
     depth_info_property_(nullptr),
-    output_topic_property_(nullptr),
-    container_service_property_(nullptr),
-    auto_load_property_(nullptr),
-    exact_sync_property_(nullptr),
-    queue_size_property_(nullptr),
-    loaded_node_id_(0),
-    load_requested_(false),
-    unload_requested_(false),
-    load_after_unload_(false),
-    retry_elapsed_(0.0f),
-    active_load_service_name_()
+    stride_property_(nullptr),
+    max_points_property_(nullptr),
+    max_render_fps_property_(nullptr),
+    point_size_property_(nullptr),
+    new_data_(false),
+    render_elapsed_(0.0f)
 {
   rgb_image_property_ = new PointCloudXyzrgbTopicProperty(
     "Color Image", kDefaultRgbImage, "RGB image topic.",
@@ -122,67 +117,86 @@ PointCloudXyzrgbDisplay::PointCloudXyzrgbDisplay()
   depth_info_property_ = new PointCloudXyzrgbTopicProperty(
     "Depth Camera Info", kDefaultDepthInfo, "CameraInfo topic for the registered depth image.",
     kCameraInfoType, this, SLOT(updateConfiguration()));
-  output_topic_property_ = new rviz_common::properties::StringProperty(
-    "Point Cloud Output", kDefaultOutput, "Generated sensor_msgs/msg/PointCloud2 topic.",
+  stride_property_ = new rviz_common::properties::IntProperty(
+    "Stride", 2, "Use every Nth depth pixel to reduce rendering cost.",
     this, SLOT(updateConfiguration()));
-  container_service_property_ = new rviz_common::properties::StringProperty(
-    "Container Load Service", kDefaultLoadService,
-    "composition_interfaces/srv/LoadNode service of an rclcpp_components container.",
+  stride_property_->setMin(1);
+  max_points_property_ = new rviz_common::properties::IntProperty(
+    "Max Points", 100000, "Maximum points rendered per frame. 0 means unlimited.",
     this, SLOT(updateConfiguration()));
-  auto_load_property_ = new rviz_common::properties::BoolProperty(
-    "Auto Load", true, "Load or reload the depth_image_proc component when enabled or edited.",
+  max_points_property_->setMin(0);
+  max_render_fps_property_ = new rviz_common::properties::FloatProperty(
+    "Max Render FPS", 15.0, "Limit point cloud rebuild rate. 0 means unlimited.",
     this, SLOT(updateConfiguration()));
-  exact_sync_property_ = new rviz_common::properties::BoolProperty(
-    "Exact Sync", false, "Pass exact_sync to depth_image_proc::PointCloudXyzrgbNode.",
-    this, SLOT(updateConfiguration()));
-  queue_size_property_ = new rviz_common::properties::IntProperty(
-    "Queue Size", 30, "Pass queue_size to depth_image_proc::PointCloudXyzrgbNode.",
-    this, SLOT(updateConfiguration()));
-  queue_size_property_->setMin(1);
+  max_render_fps_property_->setMin(0.0);
+  point_size_property_ = new rviz_common::properties::FloatProperty(
+    "Point Size", 0.01, "Rendered point size in meters.",
+    this, SLOT(updateRenderProperties()));
+  point_size_property_->setMin(0.001);
 }
 
 PointCloudXyzrgbDisplay::~PointCloudXyzrgbDisplay()
 {
+  unsubscribe();
+  if (point_cloud_ && scene_node_) {
+    scene_node_->detachObject(point_cloud_.get());
+  }
 }
 
 void PointCloudXyzrgbDisplay::onInitialize()
 {
-  rviz_default_plugins::displays::PointCloud2Display::onInitialize();
+  rviz_common::Display::onInitialize();
   const auto rviz_ros_node = context_->getRosNodeAbstraction();
   rgb_image_property_->initialize(rviz_ros_node);
   rgb_info_property_->initialize(rviz_ros_node);
   depth_image_property_->initialize(rviz_ros_node);
   depth_info_property_->initialize(rviz_ros_node);
   ensureRosNode();
-  configurePointCloudDisplay();
+
+  point_cloud_ = std::make_shared<rviz_rendering::PointCloud>();
+  scene_node_->attachObject(point_cloud_.get());
+  applyRenderProperties();
 }
 
 void PointCloudXyzrgbDisplay::onEnable()
 {
-  configurePointCloudDisplay();
-  rviz_default_plugins::displays::PointCloud2Display::onEnable();
-  if (auto_load_property_->getBool()) {
-    requestLoad();
+  if (point_cloud_) {
+    point_cloud_->setVisible(true);
   }
+  subscribe();
 }
 
 void PointCloudXyzrgbDisplay::onDisable()
 {
-  rviz_default_plugins::displays::PointCloud2Display::onDisable();
+  unsubscribe();
+  if (point_cloud_) {
+    point_cloud_->setVisible(false);
+  }
 }
 
-void PointCloudXyzrgbDisplay::update(float wall_dt, float ros_dt)
+void PointCloudXyzrgbDisplay::reset()
 {
-  rviz_default_plugins::displays::PointCloud2Display::update(wall_dt, ros_dt);
-  retry_elapsed_ += wall_dt;
-  pollServiceFutures();
+  rviz_common::Display::reset();
+  std::lock_guard<std::mutex> lock(mutex_);
+  latest_rgb_.reset();
+  latest_rgb_info_.reset();
+  latest_depth_.reset();
+  latest_depth_info_.reset();
+  new_data_ = false;
+  if (point_cloud_) {
+    point_cloud_->clearAndRemoveAllPoints();
+  }
+}
 
-  if (unload_requested_ && !unload_future_.valid()) {
-    processUnloadRequest();
+void PointCloudXyzrgbDisplay::update(float wall_dt, float)
+{
+  render_elapsed_ += wall_dt;
+  const float max_fps = max_render_fps_property_->getFloat();
+  if (max_fps > 0.0f && render_elapsed_ < 1.0f / max_fps) {
+    return;
   }
-  if (load_requested_ && !load_future_.valid() && !unload_future_.valid()) {
-    processLoadRequest();
-  }
+  render_elapsed_ = 0.0f;
+  processLatestMessages();
 }
 
 bool PointCloudXyzrgbDisplay::ensureRosNode()
@@ -203,230 +217,269 @@ bool PointCloudXyzrgbDisplay::ensureRosNode()
 
 void PointCloudXyzrgbDisplay::updateConfiguration()
 {
-  load_client_.reset();
-  unload_client_.reset();
-  configurePointCloudDisplay();
-  if (isEnabled() && auto_load_property_->getBool()) {
-    requestReload();
+  if (isEnabled()) {
+    subscribe();
   }
 }
 
-void PointCloudXyzrgbDisplay::requestLoad()
+void PointCloudXyzrgbDisplay::updateRenderProperties()
 {
-  load_requested_ = true;
-  retry_elapsed_ = 1.0f;
+  applyRenderProperties();
 }
 
-void PointCloudXyzrgbDisplay::requestReload()
+void PointCloudXyzrgbDisplay::subscribe()
 {
-  if (loaded_node_id_ == 0) {
-    requestLoad();
+  if (!ensureRosNode() || !isEnabled()) {
     return;
   }
-  requestUnload(true);
+
+  unsubscribe();
+  const auto qos = rclcpp::SensorDataQoS();
+  rgb_sub_ = node_->create_subscription<Image>(
+    rgb_image_property_->getTopicStd(), qos,
+    [this](Image::ConstSharedPtr msg) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      latest_rgb_ = msg;
+      new_data_ = true;
+    });
+  rgb_info_sub_ = node_->create_subscription<CameraInfo>(
+    rgb_info_property_->getTopicStd(), qos,
+    [this](CameraInfo::ConstSharedPtr msg) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      latest_rgb_info_ = msg;
+    });
+  depth_sub_ = node_->create_subscription<Image>(
+    depth_image_property_->getTopicStd(), qos,
+    [this](Image::ConstSharedPtr msg) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      latest_depth_ = msg;
+      new_data_ = true;
+    });
+  depth_info_sub_ = node_->create_subscription<CameraInfo>(
+    depth_info_property_->getTopicStd(), qos,
+    [this](CameraInfo::ConstSharedPtr msg) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      latest_depth_info_ = msg;
+      new_data_ = true;
+    });
 }
 
-void PointCloudXyzrgbDisplay::requestUnload(bool load_after_unload)
+void PointCloudXyzrgbDisplay::unsubscribe()
 {
-  unload_requested_ = true;
-  load_after_unload_ = load_after_unload;
-  retry_elapsed_ = 1.0f;
+  rgb_sub_.reset();
+  rgb_info_sub_.reset();
+  depth_sub_.reset();
+  depth_info_sub_.reset();
 }
 
-void PointCloudXyzrgbDisplay::processLoadRequest()
+void PointCloudXyzrgbDisplay::processLatestMessages()
 {
-  if (retry_elapsed_ < 1.0f || !ensureRosNode()) {
-    return;
-  }
-  retry_elapsed_ = 0.0f;
-
-  if (!load_client_) {
-    active_load_service_name_ = resolveLoadServiceName();
-    if (active_load_service_name_.empty()) {
-      setDisplayStatus(
-        rviz_common::properties::StatusProperty::Warn,
-        "No component container load service found. Start camera_processor_container or set Container Load Service.");
+  Image::ConstSharedPtr rgb;
+  Image::ConstSharedPtr depth;
+  CameraInfo::ConstSharedPtr depth_info;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!new_data_ || !latest_rgb_ || !latest_depth_ || !latest_depth_info_) {
       return;
     }
-    load_client_ = node_->create_client<LoadNode>(active_load_service_name_);
+    rgb = latest_rgb_;
+    depth = latest_depth_;
+    depth_info = latest_depth_info_;
+    new_data_ = false;
   }
-  if (!load_client_->service_is_ready()) {
+
+  Ogre::Vector3 position;
+  Ogre::Quaternion orientation;
+  if (!context_->getFrameManager()->getTransform(depth->header, position, orientation)) {
     setDisplayStatus(
-      rviz_common::properties::StatusProperty::Warn,
-      QString("Container load service is not ready: %1").arg(QString::fromStdString(active_load_service_name_)));
+      rviz_common::properties::StatusProperty::Error,
+      QString("No transform from %1").arg(QString::fromStdString(depth->header.frame_id)));
     return;
   }
 
-  load_future_ = load_client_->async_send_request(makeLoadRequest()).future.share();
-  load_requested_ = false;
+  std::vector<rviz_rendering::PointCloud::Point> points;
+  std::string error;
+  if (!makePointCloud(rgb, depth, depth_info, points, error)) {
+    setDisplayStatus(
+      rviz_common::properties::StatusProperty::Error, QString::fromStdString(error));
+    return;
+  }
+
+  scene_node_->setPosition(position);
+  scene_node_->setOrientation(orientation);
+  point_cloud_->clearAndRemoveAllPoints();
+  if (!points.empty()) {
+    point_cloud_->addPoints(points.begin(), points.end());
+  }
   setDisplayStatus(
-    rviz_common::properties::StatusProperty::Warn, "Loading RGB-D point cloud generator");
+    rviz_common::properties::StatusProperty::Ok,
+    QString("%1 points").arg(static_cast<int>(points.size())));
+  context_->queueRender();
 }
 
-void PointCloudXyzrgbDisplay::processUnloadRequest()
+bool PointCloudXyzrgbDisplay::makePointCloud(
+  const Image::ConstSharedPtr& rgb,
+  const Image::ConstSharedPtr& depth,
+  const CameraInfo::ConstSharedPtr& depth_info,
+  std::vector<rviz_rendering::PointCloud::Point>& points,
+  std::string& error) const
 {
-  if (loaded_node_id_ == 0) {
-    unload_requested_ = false;
-    if (load_after_unload_) {
-      load_after_unload_ = false;
-      requestLoad();
-    }
-    return;
+  if (depth_info->k[0] == 0.0 || depth_info->k[4] == 0.0) {
+    error = "Depth camera info has invalid focal length";
+    return false;
+  }
+  if (depth->width == 0 || depth->height == 0 || rgb->width == 0 || rgb->height == 0) {
+    error = "Image width or height is zero";
+    return false;
   }
 
-  if (retry_elapsed_ < 1.0f || !ensureRosNode()) {
-    return;
-  }
-  retry_elapsed_ = 0.0f;
+  const uint32_t stride = static_cast<uint32_t>(std::max(1, stride_property_->getInt()));
+  const size_t max_points = static_cast<size_t>(std::max(0, max_points_property_->getInt()));
+  const double fx = depth_info->k[0];
+  const double fy = depth_info->k[4];
+  const double cx = depth_info->k[2];
+  const double cy = depth_info->k[5];
 
-  if (!unload_client_) {
-    unload_client_ = node_->create_client<UnloadNode>(resolveUnloadServiceName());
-  }
-  if (!unload_client_->service_is_ready()) {
-    setDisplayStatus(
-      rviz_common::properties::StatusProperty::Warn, "Container unload service is not ready");
-    return;
-  }
+  const size_t estimated =
+    static_cast<size_t>((depth->width + stride - 1) / stride) *
+    static_cast<size_t>((depth->height + stride - 1) / stride);
+  points.clear();
+  points.reserve(max_points == 0 ? estimated : std::min(estimated, max_points));
 
-  auto request = std::make_shared<UnloadNode::Request>();
-  request->unique_id = loaded_node_id_;
-  unload_future_ = unload_client_->async_send_request(request).future.share();
-  unload_requested_ = false;
-  setDisplayStatus(
-    rviz_common::properties::StatusProperty::Warn, "Stopping RGB-D point cloud generator");
-}
-
-void PointCloudXyzrgbDisplay::pollServiceFutures()
-{
-  if (load_future_.valid() &&
-      load_future_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-    const auto response = load_future_.get();
-    load_future_ = rclcpp::Client<LoadNode>::SharedFuture();
-    if (response->success) {
-      loaded_node_id_ = response->unique_id;
-      configurePointCloudDisplay();
-      setDisplayStatus(
-        rviz_common::properties::StatusProperty::Ok,
-        QString("Loaded %1").arg(QString::fromStdString(response->full_node_name)));
-    } else {
-      setDisplayStatus(
-        rviz_common::properties::StatusProperty::Error,
-        QString("Load failed: %1").arg(QString::fromStdString(response->error_message)));
-    }
-  }
-
-  if (unload_future_.valid() &&
-      unload_future_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-    const auto response = unload_future_.get();
-    unload_future_ = rclcpp::Client<UnloadNode>::SharedFuture();
-    if (response->success) {
-      loaded_node_id_ = 0;
-      setDisplayStatus(rviz_common::properties::StatusProperty::Ok, "RGB-D point cloud generator stopped");
-      if (load_after_unload_) {
-        load_after_unload_ = false;
-        requestLoad();
+  for (uint32_t v = 0; v < depth->height; v += stride) {
+    for (uint32_t u = 0; u < depth->width; u += stride) {
+      if (max_points > 0 && points.size() >= max_points) {
+        return true;
       }
-    } else {
-      setDisplayStatus(
-        rviz_common::properties::StatusProperty::Error,
-        QString("Stop failed: %1").arg(QString::fromStdString(response->error_message)));
+
+      float z = 0.0f;
+      if (!readDepth(*depth, u, v, z) || z <= 0.0f || !std::isfinite(z)) {
+        continue;
+      }
+
+      const uint32_t rgb_u = std::min(
+        rgb->width - 1, static_cast<uint32_t>(
+          static_cast<uint64_t>(u) * static_cast<uint64_t>(rgb->width) / depth->width));
+      const uint32_t rgb_v = std::min(
+        rgb->height - 1, static_cast<uint32_t>(
+          static_cast<uint64_t>(v) * static_cast<uint64_t>(rgb->height) / depth->height));
+
+      float r = 1.0f;
+      float g = 1.0f;
+      float b = 1.0f;
+      readColor(*rgb, rgb_u, rgb_v, r, g, b);
+
+      rviz_rendering::PointCloud::Point point;
+      point.position.x = static_cast<float>((static_cast<double>(u) - cx) * z / fx);
+      point.position.y = static_cast<float>((static_cast<double>(v) - cy) * z / fy);
+      point.position.z = z;
+      point.setColor(r, g, b, 1.0f);
+      points.push_back(point);
     }
   }
+
+  return true;
 }
 
-std::string PointCloudXyzrgbDisplay::resolveLoadServiceName()
+bool PointCloudXyzrgbDisplay::readDepth(
+  const Image& depth, uint32_t x, uint32_t y, float& z) const
 {
-  const std::string configured_service = container_service_property_->getStdString();
-  const auto service_names_and_types = node_->get_service_names_and_types();
+  if (x >= depth.width || y >= depth.height) {
+    return false;
+  }
+  const size_t offset = static_cast<size_t>(y) * depth.step +
+    static_cast<size_t>(x) * (depth.encoding == sensor_msgs::image_encodings::TYPE_16UC1 ? 2 : 4);
 
-  const auto has_load_node_type = [](const std::vector<std::string>& types) {
-    return std::find(
-      types.begin(), types.end(), "composition_interfaces/srv/LoadNode") != types.end();
-  };
-
-  for (const auto& service_and_types : service_names_and_types) {
-    if (service_and_types.first == configured_service && has_load_node_type(service_and_types.second)) {
-      return configured_service;
+  if (depth.encoding == sensor_msgs::image_encodings::TYPE_16UC1 ||
+      depth.encoding == sensor_msgs::image_encodings::MONO16) {
+    if (offset + sizeof(uint16_t) > depth.data.size()) {
+      return false;
     }
+    uint16_t raw = 0;
+    std::memcpy(&raw, &depth.data[offset], sizeof(uint16_t));
+    z = static_cast<float>(raw) * 0.001f;
+    return raw != 0;
   }
 
-  for (const auto& service_and_types : service_names_and_types) {
-    if (service_and_types.first.find("/_container/load_node") == std::string::npos) {
-      continue;
+  if (depth.encoding == sensor_msgs::image_encodings::TYPE_32FC1) {
+    if (offset + sizeof(float) > depth.data.size()) {
+      return false;
     }
-    if (!has_load_node_type(service_and_types.second)) {
-      continue;
+    std::memcpy(&z, &depth.data[offset], sizeof(float));
+    return std::isfinite(z);
+  }
+
+  return false;
+}
+
+bool PointCloudXyzrgbDisplay::readColor(
+  const Image& rgb, uint32_t x, uint32_t y, float& r, float& g, float& b) const
+{
+  if (x >= rgb.width || y >= rgb.height) {
+    return false;
+  }
+
+  const size_t offset = static_cast<size_t>(y) * rgb.step + static_cast<size_t>(x) * rgb.step / rgb.width;
+  if (offset >= rgb.data.size()) {
+    return false;
+  }
+
+  if (hasEncoding(rgb, sensor_msgs::image_encodings::RGB8)) {
+    if (offset + 2 >= rgb.data.size()) {
+      return false;
     }
-
-    container_service_property_->blockSignals(true);
-    container_service_property_->setString(QString::fromStdString(service_and_types.first));
-    container_service_property_->blockSignals(false);
-    return service_and_types.first;
+    r = rgb.data[offset] / 255.0f;
+    g = rgb.data[offset + 1] / 255.0f;
+    b = rgb.data[offset + 2] / 255.0f;
+    return true;
+  }
+  if (hasEncoding(rgb, sensor_msgs::image_encodings::BGR8)) {
+    if (offset + 2 >= rgb.data.size()) {
+      return false;
+    }
+    b = rgb.data[offset] / 255.0f;
+    g = rgb.data[offset + 1] / 255.0f;
+    r = rgb.data[offset + 2] / 255.0f;
+    return true;
+  }
+  if (hasEncoding(rgb, sensor_msgs::image_encodings::RGBA8)) {
+    if (offset + 3 >= rgb.data.size()) {
+      return false;
+    }
+    r = rgb.data[offset] / 255.0f;
+    g = rgb.data[offset + 1] / 255.0f;
+    b = rgb.data[offset + 2] / 255.0f;
+    return true;
+  }
+  if (hasEncoding(rgb, sensor_msgs::image_encodings::BGRA8)) {
+    if (offset + 3 >= rgb.data.size()) {
+      return false;
+    }
+    b = rgb.data[offset] / 255.0f;
+    g = rgb.data[offset + 1] / 255.0f;
+    r = rgb.data[offset + 2] / 255.0f;
+    return true;
+  }
+  if (hasEncoding(rgb, sensor_msgs::image_encodings::MONO8)) {
+    const float gray = rgb.data[offset] / 255.0f;
+    r = gray;
+    g = gray;
+    b = gray;
+    return true;
   }
 
-  return std::string();
+  return false;
 }
 
-std::string PointCloudXyzrgbDisplay::resolveUnloadServiceName() const
+void PointCloudXyzrgbDisplay::applyRenderProperties()
 {
-  std::string service = active_load_service_name_.empty() ?
-    container_service_property_->getStdString() : active_load_service_name_;
-  const std::string suffix = "/load_node";
-  if (service.size() >= suffix.size() &&
-      service.compare(service.size() - suffix.size(), suffix.size(), suffix) == 0) {
-    service.replace(service.size() - suffix.size(), suffix.size(), "/unload_node");
-  }
-  return service;
-}
-
-std::string PointCloudXyzrgbDisplay::unloadServiceName() const
-{
-  std::string service = container_service_property_->getStdString();
-  const std::string suffix = "/load_node";
-  if (service.size() >= suffix.size() &&
-      service.compare(service.size() - suffix.size(), suffix.size(), suffix) == 0) {
-    service.replace(service.size() - suffix.size(), suffix.size(), "/unload_node");
-  }
-  return service;
-}
-
-PointCloudXyzrgbDisplay::LoadNode::Request::SharedPtr
-PointCloudXyzrgbDisplay::makeLoadRequest() const
-{
-  auto request = std::make_shared<LoadNode::Request>();
-  request->package_name = "depth_image_proc";
-  request->plugin_name = "depth_image_proc::PointCloudXyzrgbNode";
-  request->node_name = "points_xyzrgb_generator";
-  request->node_namespace = "";
-  request->remap_rules = {
-    "rgb/image_rect_color:=" + rgb_image_property_->getTopicStd(),
-    "rgb/camera_info:=" + rgb_info_property_->getTopicStd(),
-    "depth_registered/image_rect:=" + depth_image_property_->getTopicStd(),
-    "depth_registered/camera_info:=" + depth_info_property_->getTopicStd(),
-    "points:=" + output_topic_property_->getStdString()
-  };
-  request->parameters.push_back(
-    makeParameter("exact_sync", rclcpp::ParameterValue(exact_sync_property_->getBool())));
-  request->parameters.push_back(
-    makeParameter("queue_size", rclcpp::ParameterValue(queue_size_property_->getInt())));
-  return request;
-}
-
-void PointCloudXyzrgbDisplay::configurePointCloudDisplay()
-{
-  const QString topic = output_topic_property_->getString().trimmed();
-  if (topic.isEmpty()) {
-    setDisplayStatus(rviz_common::properties::StatusProperty::Error, "Point cloud output topic is empty");
+  if (!point_cloud_) {
     return;
   }
-
-  setTopic(topic, kPointCloud2Type);
-  if (subProp("Style")) {
-    subProp("Style")->setValue("Points");
-  }
-  if (subProp("Color Transformer")) {
-    subProp("Color Transformer")->setValue("RGB8");
-  }
+  point_cloud_->setRenderMode(rviz_rendering::PointCloud::RM_FLAT_SQUARES);
+  const float size = point_size_property_->getFloat();
+  point_cloud_->setDimensions(size, size, size);
+  point_cloud_->setAlpha(1.0f);
 }
 
 void PointCloudXyzrgbDisplay::setDisplayStatus(

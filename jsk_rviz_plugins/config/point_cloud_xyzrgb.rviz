@@ -12,18 +12,17 @@ Visualization Manager:
       Enabled: true
       Name: TF
       Value: true
-    - Auto Load: true
-      Class: jsk_rviz_plugins/PointCloudXyzrgb
+    - Class: jsk_rviz_plugins/PointCloudXyzrgb
       Color Camera Info: /camera/color/camera_info
       Color Image: /camera/color/image_raw
-      Container Load Service: /camera_processor_container/_container/load_node
       Depth Camera Info: /camera/depth/camera_info
       Depth Image: /camera/depth/image_raw
       Enabled: true
-      Exact Sync: false
+      Max Points: 0
+      Max Render FPS: 30
       Name: PointCloudXyzrgb
-      Point Cloud Output: /camera/color/points_xyzrgb
-      Queue Size: 30
+      Point Size: 0.01
+      Stride: 2
       Value: true
   Enabled: true
   Global Options:

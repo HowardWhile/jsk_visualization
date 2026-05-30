@@ -28,8 +28,7 @@
     type="jsk_rviz_plugins::PointCloudXyzrgbDisplay"
     base_class_type="rviz_common::Display">
     <description>
-      Selects RGB-D image and camera info topics, loads depth_image_proc::PointCloudXyzrgbNode,
-      and adds a PointCloud2 display in RViz2.
+      Displays RGB-D data as a point cloud directly in RViz2 without publishing a PointCloud2 topic.
     </description>
   </class>
   <class

@@ -17,23 +17,19 @@
   <buildtool_depend>rosidl_default_generators</buildtool_depend>
 
   <depend>cv_bridge</depend>
-  <depend>composition_interfaces</depend>
   <depend>geometry_msgs</depend>
   <depend>image_geometry</depend>
   <depend>image_transport</depend>
   <depend>pluginlib</depend>
   <depend>rclcpp</depend>
   <depend>rviz_common</depend>
-  <depend>rviz_default_plugins</depend>
   <depend>rviz_ogre_vendor</depend>
   <depend>rviz_rendering</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
 
   <exec_depend>diagnostic_msgs</exec_depend>
-  <exec_depend>depth_image_proc</exec_depend>
   <exec_depend>image_publisher</exec_depend>
-  <exec_depend>rclcpp_components</exec_depend>
   <exec_depend>python3-scipy</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>rosidl_default_runtime</exec_depend>
